@@ -1,0 +1,15 @@
+# Core dependencies
+aiohttp==3.9.1          # Async HTTP client for GitHub API
+aiofiles==23.2.1        # Async file operations
+asyncio-throttle==1.0.2 # Additional throttling utilities (optional)
+
+# Development and testing (optional)
+pytest==7.4.3          # Testing framework
+pytest-asyncio==0.21.1 # Async testing support
+black==23.12.0          # Code formatting
+isort==5.13.2           # Import sorting
+
+# Optional enhancements
+rich==13.7.0            # Enhanced CLI display (alternative to basic progress)
+click==8.1.7            # Enhanced CLI framework (alternative to argparse)
+pydantic==2.5.2         # Data validation (alternative to dataclasses)

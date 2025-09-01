@@ -1,0 +1,25 @@
+# Crawled Data - Main folder containing all repository data
+crawled-data/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual Environment
+venv/
+.venv/
+
+# Environment Variables
+.env
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# System Files
+.DS_Store
+Thumbs.db
