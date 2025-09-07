@@ -61,14 +61,12 @@ class BaseCrawler(abc.ABC):
             self.progress_tracker.update_operation(f"Starting {self.crawler_name}")
         
         try:
-            # Estimate total items
-            total_items = await self.estimate_total_items()
+            # Estimate total items (for initial display)
+            estimated_total = await self.estimate_total_items()
             
-            # Initialize progress tracking
-            crawler_checkpoint = self.checkpoint_manager.init_crawler(self.crawler_name, total_items)
-            
+            # Initialize progress tracking with estimate
             if self.progress_tracker:
-                self.progress_tracker.init_crawler(self.crawler_name, total_items)
+                self.progress_tracker.init_crawler(self.crawler_name, estimated_total)
                 self.progress_tracker.update_operation(f"Crawling {self.crawler_name}")
             
             # Ensure output folder exists
@@ -100,31 +98,52 @@ class BaseCrawler(abc.ABC):
                 self.crawler_name, completed, failed_item, skipped_item
             )
         
-        # Update progress tracker
+        # Update progress tracker with thread safety
         if self.progress_tracker:
             if completed > 0 or failed > 0 or skipped > 0:
-                self.progress_tracker.increment_crawler_progress(
-                    self.crawler_name, completed, failed, skipped
-                )
+                with self.progress_tracker._lock:
+                    self.progress_tracker.increment_crawler_progress(
+                        self.crawler_name, completed, failed, skipped
+                    )
+    
+    def set_total_and_complete_progress(self, actual_total: int):
+        """Set actual total and mark all as completed (for bulk operations)"""
+        # Update checkpoint manager
+        self.checkpoint_manager.init_crawler(self.crawler_name, actual_total)
+        self.checkpoint_manager.update_crawler_progress(self.crawler_name, actual_total)
+        
+        # Update progress tracker
+        if self.progress_tracker:
+            self.progress_tracker.init_crawler(self.crawler_name, actual_total)
+            self.progress_tracker.update_crawler_progress(
+                self.crawler_name, completed=actual_total
+            )
     
     async def save_data_async(self, data: Any, file_path: str, item_identifier: str = None):
         """Save data to file with error handling and progress updates"""
         try:
             await write_json_file_async(file_path, data)
-            self.update_progress(completed=1)
             
             if item_identifier:
                 self.logger.debug(f"Saved {item_identifier} to {file_path}")
                 
         except Exception as e:
             self.logger.error(f"Failed to save data to {file_path}: {e}")
-            self.update_progress(failed=1, failed_item=item_identifier or file_path)
+            if self.progress_tracker:
+                with self.progress_tracker._lock:
+                    self.progress_tracker.increment_crawler_progress(
+                        self.crawler_name, failed=1
+                    )
             raise
     
     def should_skip_existing(self, file_path: str) -> bool:
         """Check if file already exists and should be skipped"""
         if os.path.exists(file_path):
-            self.update_progress(skipped=1, skipped_item=file_path)
+            if self.progress_tracker:
+                with self.progress_tracker._lock:
+                    self.progress_tracker.increment_crawler_progress(
+                        self.crawler_name, skipped=1
+                    )
             return True
         return False
     
@@ -149,52 +168,71 @@ class BaseCrawler(abc.ABC):
                 self.checkpoint_manager.save_checkpoint()
 
 class BaseListCrawler(BaseCrawler):
-    """Base class for crawlers that fetch paginated lists"""
+    """Base class for crawlers that fetch complete datasets at once"""
     
     @abc.abstractmethod
     def get_api_method(self):
         """Get the GitHub client method to use for this crawler"""
         pass
     
-    @abc.abstractmethod  
     def get_api_params(self) -> Dict[str, Any]:
-        """Get additional parameters for the API call"""
-        pass
+        """Get additional parameters for the API call (default: none)"""
+        return {}
     
     async def estimate_total_items(self) -> int:
-        """Estimate by making a single API call to check pagination"""
-        try:
-            # Make a small request to get total count estimate
-            method = self.get_api_method()
-            params = {**self.get_api_params(), 'per_page': 1, 'page': 1}
-            
-            if hasattr(method, '__self__'):  # Bound method
-                response = await method(**params)
-            else:  # Function
-                response = await method(self.repo_owner, self.repo_name, **params)
-            
-            # GitHub doesn't provide total count, so we estimate
-            # This is a rough estimate - actual total will be determined during crawling
-            return 1000  # Default estimate
-            
-        except Exception as e:
-            self.logger.warning(f"Failed to estimate total items: {e}")
-            return 1000  # Fallback estimate
+        """Provide initial estimate for display purposes"""
+        # Return conservative estimate that will be updated during actual crawling
+        return 1000
     
     async def crawl_implementation(self) -> None:
-        """Implementation for paginated list crawling"""
+        """Implementation for complete dataset crawling with proper progress tracking"""
+        # Get the API method
         method = self.get_api_method()
-        params = self.get_api_params()
         
-        if hasattr(method, '__self__'):  # Bound method
-            data = await method(**params)
-        else:  # Function  
-            data = await method(self.repo_owner, self.repo_name, **params)
-        
-        # Update actual total
+        # Update progress tracker to show we're fetching data
         if self.progress_tracker:
-            self.progress_tracker.init_crawler(self.crawler_name, len(data))
+            self.progress_tracker.update_operation(f"Fetching all {self.crawler_name} data")
         
-        # Save all data in one file with page number
+        # Call the method to get all data at once
+        if hasattr(method, '__self__'):  # Bound method
+            data = await method()
+        else:  # Function  
+            data = await method(self.repo_owner, self.repo_name)
+        
+        # Now we know the actual total
+        actual_total = len(data)
+        self.logger.info(f"Retrieved {actual_total} items for {self.crawler_name}")
+        
+        # Update progress tracking with actual totals
+        if self.progress_tracker:
+            self.progress_tracker.init_crawler(self.crawler_name, actual_total)
+            self.progress_tracker.update_operation(f"Saving {actual_total} {self.crawler_name} items")
+        
+        # Save all data to file
         file_path = f"{self.output_folder_path}/all_data.json"
-        await self.save_data_async(data, file_path, f"{self.crawler_name}_all")
+        
+        try:
+            await write_json_file_async(file_path, data)
+            
+            # Update progress to show all items completed
+            self.set_total_and_complete_progress(actual_total)
+            
+            self.logger.info(f"Successfully saved {actual_total} items to {file_path}")
+            
+            # Perform any post-processing (can be overridden by subclasses)
+            await self.post_process_data(data)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save {self.crawler_name} data: {e}")
+            # Mark all as failed
+            if self.progress_tracker:
+                self.progress_tracker.init_crawler(self.crawler_name, actual_total)
+                self.progress_tracker.update_crawler_progress(
+                    self.crawler_name, failed=actual_total
+                )
+            raise
+    
+    async def post_process_data(self, data: List[Dict[str, Any]]):
+        """Post-process data after saving (override in subclasses if needed)"""
+        # Default: no post-processing
+        pass

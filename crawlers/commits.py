@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Dict, Any, List
 from .base_crawler import BaseListCrawler
 
 class CommitsCrawler(BaseListCrawler):
@@ -20,29 +20,11 @@ class CommitsCrawler(BaseListCrawler):
         """Parameters for commits API call"""
         return {}  # get_commits already handles pagination
     
-    async def crawl_implementation(self) -> None:
-        """Crawl all repository commits"""
-        self.logger.info("Starting commits crawl")
-        
-        # Fetch all commits
-        commits = await self.github_client.get_commits(
-            self.repo_owner, self.repo_name
-        )
-        
-        # Update actual total
-        actual_total = len(commits)
-        self.checkpoint_manager.init_crawler(self.crawler_name, actual_total)
-        
-        if self.progress_tracker:
-            self.progress_tracker.init_crawler(self.crawler_name, actual_total)
-        
-        # Save all commits
-        file_path = f"{self.output_folder_path}/all_data.json"
-        await self.save_data_async(commits, file_path, "all_commits")
-        
+    async def post_process_data(self, data: List[Dict[str, Any]]):
+        """Post-process commits data to track commit SHAs"""
         # Track completed commit SHAs for single commit crawler
-        for commit in commits:
+        for commit in data:
             if 'sha' in commit:
                 self.checkpoint_manager.add_completed_commit_sha(commit['sha'])
         
-        self.logger.info(f"Completed crawling {actual_total} commits")
+        self.logger.info(f"Tracked {len(data)} commit SHAs for single commit crawler")
