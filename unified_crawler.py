@@ -33,7 +33,7 @@ class UnifiedCrawler:
         self.is_running = False
         self.graceful_shutdown = False
         
-        # Setup logging
+        # Setup logging with reduced console output during progress display
         self.logger = logging.getLogger(__name__)
         self._setup_logging()
         
@@ -41,7 +41,7 @@ class UnifiedCrawler:
         self._setup_signal_handlers()
     
     def _setup_logging(self):
-        """Setup logging configuration"""
+        """Setup logging configuration with reduced console output during display"""
         log_folder = f"{config.base_folder}/{self.repo_owner}-{self.repo_name}/logs"
         os.makedirs(log_folder, exist_ok=True)
         
@@ -49,14 +49,28 @@ class UnifiedCrawler:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         log_file = f"{log_folder}/unified_crawler_{timestamp}.log"
         
-        # Configure logging
+        # Clear any existing handlers
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+        
+        # File handler with detailed logging
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.INFO)
+        file_formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        file_handler.setFormatter(file_formatter)
+        
+        # Console handler with minimal output during progress display
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.ERROR)  # Only show errors on console
+        console_formatter = logging.Formatter('%(levelname)s: %(message)s')
+        console_handler.setFormatter(console_formatter)
+        
+        # Configure root logger
         logging.basicConfig(
             level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler(sys.stdout)
-            ]
+            handlers=[file_handler, console_handler]
         )
     
     def _setup_signal_handlers(self):
@@ -211,20 +225,20 @@ class UnifiedCrawler:
         validation_results = validate_crawled_data(self.base_folder_path)
         
         if validation_results['valid']:
-            self.logger.info("✅ Data validation passed")
+            self.logger.info("Data validation passed")
             
             # Cleanup
             cleanup_empty_folders(self.base_folder_path)
             
             # Print final summary
             folder_size = get_folder_size_mb(self.base_folder_path)
-            self.logger.info(f"📊 Crawling completed! Data size: {folder_size:.1f} MB")
+            self.logger.info(f"Crawling completed! Data size: {folder_size:.1f} MB")
             
             # Remove checkpoint file since everything is complete
             self.checkpoint_manager.cleanup_checkpoint()
             
         else:
-            self.logger.error("❌ Data validation failed:")
+            self.logger.error("Data validation failed:")
             for error in validation_results['errors']:
                 self.logger.error(f"  - {error}")
             
@@ -233,11 +247,23 @@ class UnifiedCrawler:
     
     def get_crawling_summary(self) -> Dict[str, Any]:
         """Get summary of crawling status"""
+        # Get fresh checkpoint data
+        checkpoint_summary = self.checkpoint_manager.get_resume_summary()
+    
+        # Update with current progress tracker data if available
+        if self.progress_tracker:
+            for crawler_name, stats in self.progress_tracker.stats.items():
+                if crawler_name in checkpoint_summary.get('crawler_details', {}):
+                    checkpoint_summary['crawler_details'][crawler_name].update({
+                        'progress': f"{stats.completed}/{stats.total}",
+                        'completed': stats.is_complete
+                    })
+        
         return {
             'repository': f"{self.repo_owner}/{self.repo_name}",
             'is_running': self.is_running,
             'resume_available': os.path.exists(self.checkpoint_manager.checkpoint_file),
-            'checkpoint_summary': self.checkpoint_manager.get_resume_summary(),
+            'checkpoint_summary': checkpoint_summary,
             'base_folder': self.base_folder_path,
             'data_size_mb': get_folder_size_mb(self.base_folder_path)
         }
