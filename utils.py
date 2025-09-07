@@ -253,53 +253,365 @@ def cleanup_empty_folders(base_path: str):
             except OSError:
                 pass
 
+
 def validate_crawled_data(base_folder_path: str) -> Dict[str, Any]:
-    """Validate integrity of crawled data"""
+    """Validate integrity of crawled data with accurate counts and analysis"""
     validation_results = {
         'valid': True,
         'errors': [],
         'warnings': [],
-        'stats': {}
+        'stats': {},
+        'analysis': {}
     }
     
     try:
-        # Check pull requests
-        pull_folder = f"{base_folder_path}/pull"
-        pull_files = get_all_json_files_in_folder(pull_folder)
-        validation_results['stats']['pull_files'] = len(pull_files)
+        # Analyze pull requests DATA (not just files)
+        pull_analysis = _analyze_pull_requests_data(base_folder_path)
+        validation_results['stats'].update(pull_analysis['stats'])
+        validation_results['analysis']['pull_requests'] = pull_analysis
         
-        # Check commits
-        commit_folder = f"{base_folder_path}/commit"
-        commit_files = get_all_json_files_in_folder(commit_folder)
-        validation_results['stats']['commit_files'] = len(commit_files)
+        if pull_analysis['errors']:
+            validation_results['errors'].extend(pull_analysis['errors'])
+            validation_results['valid'] = False
+        if pull_analysis['warnings']:
+            validation_results['warnings'].extend(pull_analysis['warnings'])
         
-        # Check single commits
-        single_commit_folder = f"{base_folder_path}/commit/all"
-        single_commit_files = get_all_json_files_in_folder(single_commit_folder)
-        validation_results['stats']['single_commit_files'] = len(single_commit_files)
+        # Analyze commits DATA
+        commit_analysis = _analyze_commits_data(base_folder_path)
+        validation_results['stats'].update(commit_analysis['stats'])
+        validation_results['analysis']['commits'] = commit_analysis
         
-        # Validate JSON integrity
-        for folder in [pull_folder, commit_folder, single_commit_folder]:
-            if os.path.exists(folder):
-                for json_file in get_all_json_files_in_folder(folder):
-                    file_path = f"{folder}/{json_file}"
-                    try:
-                        with open(file_path, 'r') as f:
-                            json.load(f)
-                    except json.JSONDecodeError as e:
-                        validation_results['errors'].append(f"Invalid JSON in {file_path}: {e}")
-                        validation_results['valid'] = False
+        if commit_analysis['errors']:
+            validation_results['errors'].extend(commit_analysis['errors'])
+            validation_results['valid'] = False
+        if commit_analysis['warnings']:
+            validation_results['warnings'].extend(commit_analysis['warnings'])
         
-        # Check for missing dependencies
-        pull_numbers = get_all_pull_numbers(pull_folder)
-        for pr_number in pull_numbers[:10]:  # Check first 10 PRs
-            for dep in ['files', 'reviews', 'commits', 'comments']:
-                dep_folder = f"{pull_folder}/{pr_number}/{dep}"
-                if not os.path.exists(dep_folder):
-                    validation_results['warnings'].append(f"Missing {dep} for PR {pr_number}")
+        # Analyze PR dependencies (reviews, comments, files)
+        pr_deps_analysis = _analyze_pr_dependencies_data(base_folder_path)
+        validation_results['stats'].update(pr_deps_analysis['stats'])
+        validation_results['analysis']['pr_dependencies'] = pr_deps_analysis
+        
+        if pr_deps_analysis['warnings']:
+            validation_results['warnings'].extend(pr_deps_analysis['warnings'])
+        
+        # Validate JSON integrity for samples
+        json_validation = _validate_json_integrity(base_folder_path)
+        if json_validation['errors']:
+            validation_results['errors'].extend(json_validation['errors'])
+            validation_results['valid'] = False
+        
+        # Generate quality assessment
+        quality_assessment = _assess_data_quality(validation_results['analysis'])
+        validation_results['analysis']['quality'] = quality_assessment
         
     except Exception as e:
         validation_results['errors'].append(f"Validation failed: {e}")
         validation_results['valid'] = False
     
     return validation_results
+
+def _analyze_pull_requests_data(base_folder_path: str) -> Dict[str, Any]:
+    """Analyze pull request data comprehensively"""
+    analysis = {
+        'stats': {},
+        'errors': [],
+        'warnings': [],
+        'details': {}
+    }
+    
+    pull_folder = f"{base_folder_path}/pull"
+    all_data_file = f"{pull_folder}/all_data.json"
+    
+    # Check main pull requests file
+    if os.path.exists(all_data_file):
+        try:
+            with open(all_data_file, 'r') as f:
+                pull_data = json.load(f)
+                
+            analysis['stats']['total_pull_requests'] = len(pull_data)
+            analysis['details']['has_main_data'] = True
+            
+            # Analyze PR states
+            states = {}
+            for pr in pull_data:
+                state = pr.get('state', 'unknown')
+                states[state] = states.get(state, 0) + 1
+            analysis['details']['pr_states'] = states
+            
+        except json.JSONDecodeError as e:
+            analysis['errors'].append(f"Invalid JSON in pull requests file: {e}")
+            analysis['stats']['total_pull_requests'] = 0
+            analysis['details']['has_main_data'] = False
+        except Exception as e:
+            analysis['errors'].append(f"Error reading pull requests: {e}")
+            analysis['stats']['total_pull_requests'] = 0
+            analysis['details']['has_main_data'] = False
+    else:
+        analysis['warnings'].append("No pull requests data file found")
+        analysis['stats']['total_pull_requests'] = 0
+        analysis['details']['has_main_data'] = False
+    
+    # Count individual PR folders
+    pr_folders = []
+    if os.path.exists(pull_folder):
+        pr_folders = [item for item in os.listdir(pull_folder) if item.isdigit()]
+    
+    analysis['stats']['individual_pr_folders'] = len(pr_folders)
+    analysis['details']['pr_folders'] = sorted([int(f) for f in pr_folders])
+    
+    return analysis
+
+def _analyze_commits_data(base_folder_path: str) -> Dict[str, Any]:
+    """Analyze commit data comprehensively"""
+    analysis = {
+        'stats': {},
+        'errors': [],
+        'warnings': [],
+        'details': {}
+    }
+    
+    commit_folder = f"{base_folder_path}/commit"
+    all_data_file = f"{commit_folder}/all_data.json"
+    
+    # Check main commits file
+    if os.path.exists(all_data_file):
+        try:
+            with open(all_data_file, 'r') as f:
+                commit_data = json.load(f)
+                
+            analysis['stats']['total_repository_commits'] = len(commit_data)
+            analysis['details']['has_main_commits'] = True
+            
+        except json.JSONDecodeError as e:
+            analysis['errors'].append(f"Invalid JSON in commits file: {e}")
+            analysis['stats']['total_repository_commits'] = 0
+            analysis['details']['has_main_commits'] = False
+        except Exception as e:
+            analysis['errors'].append(f"Error reading commits: {e}")
+            analysis['stats']['total_repository_commits'] = 0
+            analysis['details']['has_main_commits'] = False
+    else:
+        analysis['warnings'].append("No repository commits data file found")
+        analysis['stats']['total_repository_commits'] = 0
+        analysis['details']['has_main_commits'] = False
+    
+    # Check individual commit details
+    single_commits_folder = f"{commit_folder}/all"
+    if os.path.exists(single_commits_folder):
+        commit_files = [f for f in os.listdir(single_commits_folder) if f.endswith('.json')]
+        analysis['stats']['individual_commit_details'] = len(commit_files)
+        analysis['details']['has_individual_commits'] = len(commit_files) > 0
+        
+        # Calculate coverage percentage
+        if analysis['stats']['total_repository_commits'] > 0:
+            coverage = (len(commit_files) / analysis['stats']['total_repository_commits']) * 100
+            analysis['stats']['commit_detail_coverage_percentage'] = round(coverage, 1)
+        else:
+            analysis['stats']['commit_detail_coverage_percentage'] = 0
+    else:
+        analysis['stats']['individual_commit_details'] = 0
+        analysis['details']['has_individual_commits'] = False
+        analysis['stats']['commit_detail_coverage_percentage'] = 0
+    
+    return analysis
+
+def _analyze_pr_dependencies_data(base_folder_path: str) -> Dict[str, Any]:
+    """Analyze PR dependency data (files, reviews, comments, commits)"""
+    analysis = {
+        'stats': {},
+        'warnings': [],
+        'details': {}
+    }
+    
+    pull_folder = f"{base_folder_path}/pull"
+    
+    if not os.path.exists(pull_folder):
+        return analysis
+    
+    # Get all PR folders
+    pr_folders = [item for item in os.listdir(pull_folder) if item.isdigit()]
+    
+    if not pr_folders:
+        return analysis
+    
+    dependency_types = ['files', 'reviews', 'comments', 'commits']
+    
+    for dep_type in dependency_types:
+        stats = {
+            f'prs_with_{dep_type}': 0,
+            f'prs_without_{dep_type}': 0,
+            f'total_{dep_type}_count': 0,
+            f'{dep_type}_coverage_percentage': 0
+        }
+        
+        for pr_folder in pr_folders:
+            dep_file = f"{pull_folder}/{pr_folder}/{dep_type}/all_data.json"
+            
+            if os.path.exists(dep_file):
+                try:
+                    with open(dep_file, 'r') as f:
+                        data = json.load(f)
+                    
+                    if len(data) > 0:
+                        stats[f'prs_with_{dep_type}'] += 1
+                        stats[f'total_{dep_type}_count'] += len(data)
+                    else:
+                        stats[f'prs_without_{dep_type}'] += 1
+                        
+                except (json.JSONDecodeError, Exception):
+                    stats[f'prs_without_{dep_type}'] += 1
+            else:
+                stats[f'prs_without_{dep_type}'] += 1
+        
+        # Calculate coverage percentage
+        total_prs = len(pr_folders)
+        if total_prs > 0:
+            coverage = (stats[f'prs_with_{dep_type}'] / total_prs) * 100
+            stats[f'{dep_type}_coverage_percentage'] = round(coverage, 1)
+        
+        # Add to main stats
+        analysis['stats'].update(stats)
+        
+        # Add warnings for low coverage
+        if stats[f'{dep_type}_coverage_percentage'] < 5:
+            analysis['warnings'].append(
+                f"Very low {dep_type} coverage ({stats[f'{dep_type}_coverage_percentage']:.1f}%) - "
+                f"may impact reviewer recommendation quality"
+            )
+    
+    return analysis
+
+def _validate_json_integrity(base_folder_path: str) -> Dict[str, Any]:
+    """Validate JSON integrity for a sample of files"""
+    validation = {
+        'errors': [],
+        'files_checked': 0
+    }
+    
+    # Check key files
+    key_files = [
+        f"{base_folder_path}/pull/all_data.json",
+        f"{base_folder_path}/commit/all_data.json"
+    ]
+    
+    for file_path in key_files:
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, 'r') as f:
+                    json.load(f)
+                validation['files_checked'] += 1
+            except json.JSONDecodeError as e:
+                validation['errors'].append(f"Invalid JSON in {file_path}: {e}")
+    
+    # Check sample of individual files
+    individual_commit_folder = f"{base_folder_path}/commit/all"
+    if os.path.exists(individual_commit_folder):
+        commit_files = [f for f in os.listdir(individual_commit_folder) if f.endswith('.json')]
+        sample_size = min(10, len(commit_files))
+        
+        for commit_file in commit_files[:sample_size]:
+            file_path = f"{individual_commit_folder}/{commit_file}"
+            try:
+                with open(file_path, 'r') as f:
+                    json.load(f)
+                validation['files_checked'] += 1
+            except json.JSONDecodeError as e:
+                validation['errors'].append(f"Invalid JSON in {file_path}: {e}")
+    
+    return validation
+
+def _assess_data_quality(analysis: Dict[str, Any]) -> Dict[str, Any]:
+    """Assess overall data quality for reviewer recommendation systems"""
+    assessment = {
+        'overall_score': 0,
+        'suitability_for_reviewer_recommendation': 'unknown',
+        'strengths': [],
+        'weaknesses': [],
+        'recommendations': []
+    }
+    
+    try:
+        # Get key metrics
+        total_prs = analysis.get('pull_requests', {}).get('stats', {}).get('total_pull_requests', 0)
+        review_coverage = analysis.get('pr_dependencies', {}).get('stats', {}).get('reviews_coverage_percentage', 0)
+        total_reviews = analysis.get('pr_dependencies', {}).get('stats', {}).get('total_reviews_count', 0)
+        commit_coverage = analysis.get('commits', {}).get('stats', {}).get('commit_detail_coverage_percentage', 0)
+        
+        # Score calculation (0-100)
+        score = 0
+        
+        # PR data availability (30 points)
+        if total_prs > 0:
+            score += 30
+            assessment['strengths'].append(f"Has {total_prs} pull requests")
+        else:
+            assessment['weaknesses'].append("No pull request data found")
+        
+        # Review coverage (40 points)
+        if review_coverage >= 30:
+            score += 40
+            assessment['strengths'].append(f"Excellent review coverage ({review_coverage:.1f}%)")
+        elif review_coverage >= 15:
+            score += 25
+            assessment['strengths'].append(f"Good review coverage ({review_coverage:.1f}%)")
+        elif review_coverage >= 5:
+            score += 10
+            assessment['weaknesses'].append(f"Low review coverage ({review_coverage:.1f}%)")
+        else:
+            assessment['weaknesses'].append(f"Very low review coverage ({review_coverage:.1f}%)")
+        
+        # Commit detail coverage (20 points)
+        if commit_coverage >= 80:
+            score += 20
+            assessment['strengths'].append(f"Complete commit details ({commit_coverage:.1f}%)")
+        elif commit_coverage >= 50:
+            score += 15
+        elif commit_coverage >= 20:
+            score += 10
+            assessment['weaknesses'].append(f"Incomplete commit details ({commit_coverage:.1f}%)")
+        else:
+            assessment['weaknesses'].append(f"Missing most commit details ({commit_coverage:.1f}%)")
+        
+        # Total review count (10 points)
+        if total_reviews >= 100:
+            score += 10
+            assessment['strengths'].append(f"Substantial review data ({total_reviews} reviews)")
+        elif total_reviews >= 50:
+            score += 7
+        elif total_reviews >= 20:
+            score += 5
+        else:
+            assessment['weaknesses'].append(f"Limited review data ({total_reviews} reviews)")
+        
+        assessment['overall_score'] = score
+        
+        # Determine suitability
+        if score >= 70:
+            assessment['suitability_for_reviewer_recommendation'] = 'excellent'
+            assessment['recommendations'].append("Data is well-suited for reviewer recommendation systems")
+        elif score >= 50:
+            assessment['suitability_for_reviewer_recommendation'] = 'good'
+            assessment['recommendations'].append("Data can be used for reviewer recommendation with good results")
+        elif score >= 30:
+            assessment['suitability_for_reviewer_recommendation'] = 'limited'
+            assessment['recommendations'].append("Consider supplementing with additional repositories")
+        else:
+            assessment['suitability_for_reviewer_recommendation'] = 'poor'
+            assessment['recommendations'].append("Recommend finding repositories with more review activity")
+        
+        # Specific recommendations
+        if review_coverage < 20:
+            assessment['recommendations'].append(
+                "Low review coverage may require algorithm adjustments to focus on file-based features"
+            )
+        
+        if total_reviews < 50:
+            assessment['recommendations'].append(
+                "Consider combining data from multiple similar repositories"
+            )
+            
+    except Exception as e:
+        assessment['error'] = str(e)
+    
+    return assessment
