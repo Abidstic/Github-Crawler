@@ -1,16 +1,3 @@
-#!/usr/bin/env python3
-"""
-GitHub Unified Crawler - Main CLI Entry Point
-
-A comprehensive GitHub repository crawler that fetches all repository data
-including pull requests, commits, reviews, files, and detailed commit information.
-
-Usage:
-    python main.py --owner facebook --repo react
-    python main.py --owner microsoft --repo vscode --no-resume
-    python main.py --owner tensorflow --repo tensorflow --conservative
-"""
-
 import argparse
 import asyncio
 import sys
@@ -200,10 +187,40 @@ async def validate_only_mode(owner: str, repo: str):
         folder_size = get_folder_size_mb(base_folder)
         print(f"📊 Data size: {folder_size:.1f} MB")
         
-        # Print stats
+        # Print comprehensive stats
         stats = results.get('stats', {})
-        for key, value in stats.items():
-            print(f"   {key}: {value:,} files")
+        analysis = results.get('analysis', {})
+
+        # Core data counts
+        print(f"   Total Pull Requests: {stats.get('total_pull_requests', 0):,}")
+        print(f"   Total Repository Commits: {stats.get('total_repository_commits', 0):,}")
+        print(f"   Individual Commit Details: {stats.get('individual_commit_details', 0):,}")
+
+        # Coverage analysis
+        print(f"   Review Coverage: {stats.get('reviews_coverage_percentage', 0):.1f}%")
+        print(f"   Comment Coverage: {stats.get('comments_coverage_percentage', 0):.1f}%")
+        print(f"   Files Coverage: {stats.get('files_coverage_percentage', 0):.1f}%")
+
+        # Quality assessment
+        quality = analysis.get('quality', {})
+        if quality:
+            print(f"   Overall Quality Score: {quality.get('overall_score', 0)}/100")
+            suitability = quality.get('suitability_for_reviewer_recommendation', 'unknown')
+            print(f"   Reviewer Recommendation Suitability: {suitability.title()}")
+            
+            # Show key recommendations
+            recommendations = quality.get('recommendations', [])
+            if recommendations:
+                print("   Key Recommendations:")
+                for rec in recommendations[:2]:  # Show first 2 recommendations
+                    print(f"     - {rec}")
+                    
+        # Show data quality warnings
+        warnings = results.get('warnings', [])
+        if warnings:
+            print("   Warnings:")
+            for warning in warnings[:3]:  # Show first 3 warnings
+                print(f"     - {warning}")
     else:
         print("❌ Data validation failed!")
         for error in results['errors']:
@@ -233,10 +250,27 @@ def print_final_summary(summary):
             if details['failed_count'] > 0:
                 print(f"      ⚠️ Failed items: {details['failed_count']}")
     
+    # Run quick validation and show quality metrics
+    try:
+        validation_results = validate_crawled_data(summary['base_folder'])
+        if validation_results.get('analysis', {}).get('quality'):
+            quality = validation_results['analysis']['quality']
+            print(f"\n📈 Data Quality Assessment:")
+            print(f"   Quality Score: {quality.get('overall_score', 0)}/100")
+            print(f"   Reviewer Recommendation Suitability: {quality.get('suitability_for_reviewer_recommendation', 'unknown').title()}")
+            
+            stats = validation_results.get('stats', {})
+            review_coverage = stats.get('reviews_coverage_percentage', 0)
+            if review_coverage > 0:
+                print(f"   Review Coverage: {review_coverage:.1f}%")
+    except Exception:
+        pass  # Skip quality assessment if validation fails
+    
     print(f"\n🎯 Next Steps:")
     print(f"   1. Your data is ready in: {summary['base_folder']}")
-    print(f"   2. Use this path in your reviewer recommendation system")
-    print(f"   3. Run validation: python main.py --owner {summary['repository'].split('/')[0]} --repo {summary['repository'].split('/')[1]} --validate-only")
+    print(f"   2. Run quality analysis: python data_quality_analyzer.py {summary['base_folder']}")
+    print(f"   3. Use this path in your reviewer recommendation system")
+    print(f"   4. Run validation: python main.py --owner {summary['repository'].split('/')[0]} --repo {summary['repository'].split('/')[1]} --validate-only")
     
     print("=" * 80)
 
