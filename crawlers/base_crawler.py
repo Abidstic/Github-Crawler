@@ -194,10 +194,7 @@ class BaseListCrawler(BaseCrawler):
             self.progress_tracker.update_operation(f"Fetching all {self.crawler_name} data")
         
         # Call the method to get all data at once
-        if hasattr(method, '__self__'):  # Bound method
-            data = await method()
-        else:  # Function  
-            data = await method(self.repo_owner, self.repo_name)
+        data = await method(self.repo_owner, self.repo_name)
         
         # Now we know the actual total
         actual_total = len(data)
