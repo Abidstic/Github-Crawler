@@ -35,6 +35,10 @@ class MasterCheckpoint:
     crawlers: Dict[str, CrawlerCheckpoint] = None
     completed_pull_numbers: Set[int] = None
     completed_commit_shas: Set[str] = None
+    crawl_limit: int = 0
+    crawl_selection: str = 'latest'
+    pr_date_since: str = None
+    pr_date_until: str = None
     
     def __post_init__(self):
         if self.crawlers is None:
@@ -170,6 +174,25 @@ class CheckpointManager:
     def add_completed_commit_sha(self, commit_sha: str):
         """Track completed commit"""
         self.checkpoint.completed_commit_shas.add(commit_sha)
+    
+    def set_crawl_limit(self, limit: int, selection: str):
+        """Persist the crawl limiter settings so resume uses the same scope"""
+        self.checkpoint.crawl_limit = limit
+        self.checkpoint.crawl_selection = selection
+    
+    def get_crawl_limit(self):
+        """Get crawl limiter settings (limit, selection)"""
+        return self.checkpoint.crawl_limit, self.checkpoint.crawl_selection
+    
+    def set_pr_date_range(self, since: str, until: str):
+        """Store the date range of the selected/limited PRs, used to keep
+        repository commits relevant to those PRs rather than crawling all history"""
+        self.checkpoint.pr_date_since = since
+        self.checkpoint.pr_date_until = until
+    
+    def get_pr_date_range(self):
+        """Get the stored PR date range (since, until)"""
+        return self.checkpoint.pr_date_since, self.checkpoint.pr_date_until
     
     def is_pull_completed(self, pull_number: int) -> bool:
         """Check if pull request is already processed"""

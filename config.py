@@ -30,6 +30,10 @@ class CrawlerConfig:
     # Checkpoint settings
     checkpoint_interval: int = 50      # Save checkpoint every N operations
     
+    # Crawl limiter settings (interactive scoped crawling)
+    crawl_limit: int = 0               # 0 = no limit, crawl everything
+    crawl_selection: str = 'latest'    # 'latest', 'oldest', or 'random'
+    
     def __post_init__(self):
         if not self.github_token:
             raise ValueError("GitHub token is required. Set GH_TOKEN environment variable.")

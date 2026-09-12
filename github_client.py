@@ -159,10 +159,17 @@ class GitHubClient:
         url = f"{config.base_url}/repos/{repo_owner}/{repo_name}/pulls"
         return await self.get_paginated_data(url, {'state': 'all'})
     
-    async def get_commits(self, repo_owner: str, repo_name: str) -> List[Dict[str, Any]]:
-        """Get all commits for a repository"""
+    async def get_commits(self, repo_owner: str, repo_name: str,
+                          since: str = None, until: str = None) -> List[Dict[str, Any]]:
+        """Get all commits for a repository, optionally scoped to a date range
+        (used to keep commits relevant to a limited set of crawled PRs)"""
         url = f"{config.base_url}/repos/{repo_owner}/{repo_name}/commits"
-        return await self.get_paginated_data(url)
+        params = {}
+        if since:
+            params['since'] = since
+        if until:
+            params['until'] = until
+        return await self.get_paginated_data(url, params)
     
     async def get_pull_files(self, repo_owner: str, repo_name: str, pull_number: int) -> List[Dict[str, Any]]:
         """Get files for a specific pull request"""

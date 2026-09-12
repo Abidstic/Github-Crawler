@@ -179,6 +179,11 @@ class BaseListCrawler(BaseCrawler):
         """Get additional parameters for the API call (default: none)"""
         return {}
     
+    def filter_data(self, data: List[Any]) -> List[Any]:
+        """Hook for subclasses to filter/limit the dataset before it is saved
+        (default: no-op). Used by the crawl limiter to scope what gets crawled."""
+        return data
+    
     async def estimate_total_items(self) -> int:
         """Provide initial estimate for display purposes"""
         # Return conservative estimate that will be updated during actual crawling
@@ -193,8 +198,11 @@ class BaseListCrawler(BaseCrawler):
         if self.progress_tracker:
             self.progress_tracker.update_operation(f"Fetching all {self.crawler_name} data")
         
-        # Call the method to get all data at once
-        data = await method(self.repo_owner, self.repo_name)
+        # Call the method to get all data at once (with any scoping params, e.g. date range)
+        data = await method(self.repo_owner, self.repo_name, **self.get_api_params())
+        
+        # Allow subclasses to limit/filter the dataset (crawl limiter) before saving
+        data = self.filter_data(data)
         
         # Now we know the actual total
         actual_total = len(data)

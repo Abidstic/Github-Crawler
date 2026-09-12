@@ -39,6 +39,51 @@ def print_help_examples():
     print("  python main.py --owner microsoft --repo vscode --no-resume")
     print("  python main.py --owner tensorflow --repo tensorflow --conservative")
     print("  python main.py --owner myorg --repo myrepo --validate-only")
+    print("  python main.py --owner myorg --repo myrepo --limit 100 --selection latest")
+
+def configure_crawl_limit(args):
+    """Set config.crawl_limit / config.crawl_selection from CLI args."""
+
+    # Non-interactive path: explicit CLI flags
+    if args.limit is not None:
+        config.crawl_limit = max(0, args.limit)
+        config.crawl_selection = args.selection or 'latest'
+        return
+
+    # Interactive path
+    print("\n📊 Crawl Limiter")
+    print("   This analysis only needs a limited, relevant sample rather than the full repo.")
+    limit_input = input(
+        "   How many pull requests would you like to crawl? "
+        "(press Enter for all): "
+    ).strip()
+
+    if not limit_input:
+        config.crawl_limit = 0
+        config.crawl_selection = 'latest'
+        return
+
+    try:
+        limit = int(limit_input)
+    except ValueError:
+        print("   ⚠️  Not a valid number — crawling all pull requests instead.")
+        config.crawl_limit = 0
+        config.crawl_selection = 'latest'
+        return
+
+    if limit <= 0:
+        config.crawl_limit = 0
+        config.crawl_selection = 'latest'
+        return
+
+    selection_input = input(
+        "   Which pull requests? [latest/oldest/random] (default: latest): "
+    ).strip().lower()
+
+    config.crawl_limit = limit
+    config.crawl_selection = selection_input if selection_input in ('latest', 'oldest', 'random') else 'latest'
+    print(f"   ✅ Will crawl {config.crawl_limit} {config.crawl_selection} pull requests, "
+          f"plus commits/files/reviews/comments for just those PRs.")
 
 async def main():
     """Main entry point"""
@@ -106,6 +151,20 @@ The crawler will fetch:
     )
     
     parser.add_argument(
+        '--limit',
+        type=int,
+        default=None,
+        help='Limit crawl to N pull requests (and matching commits). Omit to be asked interactively, or pass 0 for no limit.'
+    )
+    
+    parser.add_argument(
+        '--selection',
+        choices=['latest', 'oldest', 'random'],
+        default=None,
+        help='Which N pull requests to keep when --limit is set (default: latest)'
+    )
+    
+    parser.add_argument(
         '--examples',
         action='store_true',
         help='Show usage examples and exit'
@@ -134,11 +193,19 @@ The crawler will fetch:
         await validate_only_mode(args.owner, args.repo)
         return
     
+    # Crawl limiter: how much data to crawl, kept relevant across PRs/commits
+    configure_crawl_limit(args)
+    
     print(f"\n🎯 Target Repository: {args.owner}/{args.repo}")
     print(f"📁 Data will be saved to: {config.base_folder}/{args.owner}-{args.repo}")
     print(f"🔄 Resume mode: {'Enabled' if not args.no_resume else 'Disabled'}")
     print(f"⚡ Max concurrent requests: {config.max_concurrent_requests}")
     print(f"🛡️  Rate limit buffer: {config.rate_limit_buffer}")
+    if config.crawl_limit > 0:
+        print(f"🎯 Crawl limit: {config.crawl_limit} pull requests ({config.crawl_selection}) "
+              f"— commits will be scoped to match")
+    else:
+        print(f"🎯 Crawl limit: none (full repository)")
     
     # Ask for confirmation for large repositories
     response = input("\nProceed with crawling? [Y/n]: ").strip().lower()
