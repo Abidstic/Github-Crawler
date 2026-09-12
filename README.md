@@ -5,6 +5,7 @@ A production-grade GitHub repository crawler with intelligent rate limiting, rea
 ## Features
 
 - **Complete Data Extraction**: Crawls pull requests, commits, reviews, files, comments, and detailed commit information
+- **Interactive Crawl Limiter**: Optionally scope a crawl to N pull requests (latest/oldest/random) instead of the full repository, with commits automatically kept relevant to the same PRs
 - **Smart Rate Limiting**: Automatic GitHub API rate limit management with adaptive throttling
 - **Real-time Progress Display**: Live CLI progress updates with ETA calculations and completion percentages
 - **Resume Capability**: Automatic checkpointing allows resuming from any interruption point
@@ -56,8 +57,8 @@ python3 main.py --owner facebook --repo react
 The crawler extracts comprehensive data in three optimized phases:
 
 ### Phase 1: Foundation Data (Sequential)
-1. **Pull Requests** - All PRs with metadata, states, authors, dates
-2. **Repository Commits** - Complete commit history with SHAs and metadata
+1. **Pull Requests** - PRs with metadata, states, authors, dates (all of them, or a limited/relevant subset — see [Crawl Limiter](#crawl-limiter) below)
+2. **Repository Commits** - Commit history with SHAs and metadata (scoped to the same date range as the selected PRs when a limit is active)
 
 ### Phase 2: PR Dependencies (Parallel)
 3. **PR Files** - File changes, additions, deletions, and diff patches for each PR
@@ -66,7 +67,26 @@ The crawler extracts comprehensive data in three optimized phases:
 6. **PR Commits** - Specific commits within each pull request
 
 ### Phase 3: Detailed Analysis (Intelligent Batching)
-7. **Individual Commit Details** - Complete data for every unique commit across the repository
+7. **Individual Commit Details** - Complete data for every unique commit referenced by the crawled PRs/commits
+
+## Crawl Limiter
+
+```bash
+# Interactive: prompts for a limit and selection if you don't pass --limit
+python3 main.py --owner facebook --repo react
+
+# Non-interactive: limit to the 100 most recent PRs
+python3 main.py --owner facebook --repo react --limit 100 --selection latest
+
+# Oldest 50 PRs
+python3 main.py --owner facebook --repo react --limit 50 --selection oldest
+
+# Random sample of 200 PRs
+python3 main.py --owner facebook --repo react --limit 200 --selection random
+
+# No limit (crawl everything, same as before this feature existed)
+python3 main.py --owner facebook --repo react --limit 0
+```
 
 ## Usage Examples
 
@@ -89,6 +109,9 @@ python3 main.py --owner facebook --repo react --validate-only
 ```bash
 # Custom concurrent request limit
 python3 main.py --owner myorg --repo myrepo --max-concurrent 5
+
+# Limit to a relevant sample of pull requests (see Crawl Limiter section)
+python3 main.py --owner myorg --repo myrepo --limit 100 --selection latest
 
 # Show all available options
 python3 main.py --help
@@ -269,6 +292,10 @@ max_backoff_delay = 300.0           # Maximum delay (5 minutes)
 # Progress and checkpoint settings
 progress_update_interval = 1.0      # Progress display update frequency
 checkpoint_interval = 50            # Save checkpoint every N operations
+
+# Crawl limiter settings (usually set via --limit/--selection instead)
+crawl_limit = 0                     # 0 = no limit, crawl everything
+crawl_selection = 'latest'          # 'latest', 'oldest', or 'random'
 ```
 
 ## Error Handling and Recovery
